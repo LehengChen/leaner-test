@@ -37,7 +37,7 @@ jobs:
             }
 
             if (!isOwner) {
-              core.info('Actor is not allowed for phase 1/2, exiting.')
+              core.info('Actor is not allowed for phase 1/2/3, exiting.')
               return
             }
 
@@ -48,15 +48,34 @@ jobs:
               pull_number: issue_number,
             })
 
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: issue_number,
+              per_page: 100,
+            })
+
             const headRef = pr.head.ref
             const headSha = pr.head.sha
             const baseRef = pr.base.ref
             const changedFiles = pr.changed_files
+            const fileNames = files.map(f => f.filename)
+            const leanFiles = fileNames.filter(name => name.endsWith('.lean'))
 
             core.info(`headRef=${headRef}`)
             core.info(`headSha=${headSha}`)
             core.info(`baseRef=${baseRef}`)
             core.info(`changedFiles=${changedFiles}`)
+            core.info(`fileNames=${JSON.stringify(fileNames)}`)
+            core.info(`leanFiles=${JSON.stringify(leanFiles)}`)
+
+            const changedList = fileNames.length > 0
+              ? fileNames.map(name => `  - ${name}`).join('\n')
+              : '  - (none)'
+
+            const leanList = leanFiles.length > 0
+              ? leanFiles.map(name => `  - ${name}`).join('\n')
+              : '  - (none)'
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -70,8 +89,17 @@ jobs:
                 `- Base branch: \`${baseRef}\``,
                 `- Head branch: \`${headRef}\``,
                 `- Head SHA: \`${headSha}\``,
-                `- Changed files: ${changedFiles}`,
-                '- Phase 2 status: PR metadata retrieval is working.',
-                '- Next step: fetch changed files and identify `.lean` targets.'
+                `- Changed files count: ${changedFiles}`,
+                '',
+                '**Changed files**',
+                changedList,
+                '',
+                '**Lean targets**',
+                leanList,
+                '',
+                leanFiles.length > 0
+                  ? '- Phase 3 status: Lean target file detection is working.'
+                  : '- Phase 3 status: No `.lean` files found in this PR.',
+                '- Next step: read changed Lean file contents or patch hunks inside a Codex + Lean-capable environment.'
               ].join('\n')
             })
