@@ -37,7 +37,7 @@ jobs:
             }
 
             if (!isOwner) {
-              core.info('Actor is not allowed for phase 1/2/3, exiting.')
+              core.info('Actor is not allowed for phase 1/2/3/4, exiting.')
               return
             }
 
@@ -60,22 +60,36 @@ jobs:
             const baseRef = pr.base.ref
             const changedFiles = pr.changed_files
             const fileNames = files.map(f => f.filename)
-            const leanFiles = fileNames.filter(name => name.endsWith('.lean'))
+            const leanFiles = files.filter(f => f.filename.endsWith('.lean'))
 
             core.info(`headRef=${headRef}`)
             core.info(`headSha=${headSha}`)
             core.info(`baseRef=${baseRef}`)
             core.info(`changedFiles=${changedFiles}`)
             core.info(`fileNames=${JSON.stringify(fileNames)}`)
-            core.info(`leanFiles=${JSON.stringify(leanFiles)}`)
+            core.info(`leanFiles=${JSON.stringify(leanFiles.map(f => f.filename))}`)
 
             const changedList = fileNames.length > 0
               ? fileNames.map(name => `  - ${name}`).join('\n')
               : '  - (none)'
 
             const leanList = leanFiles.length > 0
-              ? leanFiles.map(name => `  - ${name}`).join('\n')
+              ? leanFiles.map(name => `  - ${name.filename}`).join('\n')
               : '  - (none)'
+
+            let leanPatchSection = '**Lean patch hunks**\n  - (none)'
+            if (leanFiles.length > 0) {
+              const rendered = leanFiles.map(file => {
+                const patch = file.patch ? file.patch : '(no patch hunk available from GitHub API)'
+                return [
+                  `- ${file.filename}`,
+                  '```diff',
+                  patch,
+                  '```'
+                ].join('\n')
+              }).join('\n\n')
+              leanPatchSection = ['**Lean patch hunks**', rendered].join('\n')
+            }
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -97,9 +111,11 @@ jobs:
                 '**Lean targets**',
                 leanList,
                 '',
+                leanPatchSection,
+                '',
                 leanFiles.length > 0
-                  ? '- Phase 3 status: Lean target file detection is working.'
-                  : '- Phase 3 status: No `.lean` files found in this PR.',
-                '- Next step: read changed Lean file contents or patch hunks inside a Codex + Lean-capable environment.'
+                  ? '- Phase 4 status: Lean patch hunk retrieval is working.'
+                  : '- Phase 4 status: No `.lean` files found in this PR, so no Lean patch hunk was fetched.',
+                '- Next step: move this input into a Codex + Lean-capable environment for real golf analysis.'
               ].join('\n')
             })
