@@ -16,6 +16,7 @@ jobs:
       - name: Handle /leanbot golf command
         uses: actions/github-script@v7
         with:
+          github-token: ${{ secrets.LEANBOT_TOKEN }}
           script: |
             const body = (context.payload.comment?.body || '').trim()
             const isPR = Boolean(context.payload.issue?.pull_request)
