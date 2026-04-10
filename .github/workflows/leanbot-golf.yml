@@ -37,11 +37,27 @@ jobs:
             }
 
             if (!isOwner) {
-              core.info('Actor is not allowed for phase 1, exiting.')
+              core.info('Actor is not allowed for phase 1/2, exiting.')
               return
             }
 
             const issue_number = context.payload.issue.number
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: issue_number,
+            })
+
+            const headRef = pr.head.ref
+            const headSha = pr.head.sha
+            const baseRef = pr.base.ref
+            const changedFiles = pr.changed_files
+
+            core.info(`headRef=${headRef}`)
+            core.info(`headSha=${headSha}`)
+            core.info(`baseRef=${baseRef}`)
+            core.info(`changedFiles=${changedFiles}`)
+
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -51,7 +67,11 @@ jobs:
                 '',
                 `- PR: #${issue_number}`,
                 `- Triggered by: @${context.actor}`,
-                '- Phase 1 status: comment trigger is working.',
-                '- Next step: wire in PR metadata and changed-file analysis.'
+                `- Base branch: \`${baseRef}\``,
+                `- Head branch: \`${headRef}\``,
+                `- Head SHA: \`${headSha}\``,
+                `- Changed files: ${changedFiles}`,
+                '- Phase 2 status: PR metadata retrieval is working.',
+                '- Next step: fetch changed files and identify `.lean` targets.'
               ].join('\n')
             })
