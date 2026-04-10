@@ -26,18 +26,9 @@ jobs:
             core.setOutput('should_run', 'false')
             core.setOutput('issue_number', String(context.payload.issue?.number || ''))
 
-            if (!isPR) {
-              core.info('Not a PR comment, exiting.')
-              return
-            }
-            if (body !== '/leanbot golf') {
-              core.info('Not the target command, exiting.')
-              return
-            }
-            if (!isOwner) {
-              core.info('Actor is not allowed for phase 1/2/3/4/5, exiting.')
-              return
-            }
+            if (!isPR) return core.info('Not a PR comment, exiting.')
+            if (body !== '/leanbot golf') return core.info('Not the target command, exiting.')
+            if (!isOwner) return core.info('Actor is not allowed for current phases, exiting.')
 
             const issue_number = context.payload.issue.number
             const { data: pr } = await github.rest.pulls.get({
@@ -84,38 +75,66 @@ jobs:
             echo 'top_files<<EOF'
             find . -maxdepth 2 -type f | sort
             echo 'EOF'
-            if [ -f README.md ]; then
-              echo 'readme_present=true'
+            if [ -f README.md ]; then echo 'readme_present=true'; else echo 'readme_present=false'; fi
+            if [ -f Lean/Example.lean ]; then echo 'lean_example_present=true'; else echo 'lean_example_present=false'; fi
+            if [ -f lean-toolchain ]; then
+              echo 'lean_toolchain_present=true'
+              echo 'lean_toolchain_value<<EOF'
+              cat lean-toolchain
+              echo 'EOF'
             else
-              echo 'readme_present=false'
-            fi
-            if [ -f Lean/Example.lean ]; then
-              echo 'lean_example_present=true'
-            else
-              echo 'lean_example_present=false'
+              echo 'lean_toolchain_present=false'
+              echo 'lean_toolchain_value<<EOF'
+              echo '(missing)'
+              echo 'EOF'
             fi
           } >> "$GITHUB_OUTPUT"
 
-      - name: Reply with Phase 5 status
+      - name: Install Lean from lean-toolchain
+        if: steps.meta.outputs.should_run == 'true' && steps.inspect.outputs.lean_toolchain_present == 'true'
+        id: leanenv
+        shell: bash
+        run: |
+          set -euxo pipefail
+          curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh -s -- -y
+          export PATH="$HOME/.elan/bin:$PATH"
+          TOOLCHAIN=$(cat lean-toolchain)
+          elan toolchain install "$TOOLCHAIN"
+          elan default "$TOOLCHAIN"
+          {
+            echo 'lean_version<<EOF'
+            lean --version
+            echo 'EOF'
+            echo 'lake_version<<EOF'
+            lake --version
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Reply with Phase 6A status
         if: steps.meta.outputs.should_run == 'true'
         uses: actions/github-script@v7
+        env:
+          CHANGED_LIST: ${{ steps.meta.outputs.changed_list }}
+          LEAN_LIST: ${{ steps.meta.outputs.lean_list }}
+          TOP_FILES: ${{ steps.inspect.outputs.top_files }}
+          LEAN_TOOLCHAIN_VALUE: ${{ steps.inspect.outputs.lean_toolchain_value }}
+          LEAN_VERSION: ${{ steps.leanenv.outputs.lean_version }}
+          LAKE_VERSION: ${{ steps.leanenv.outputs.lake_version }}
+          LEAN_TOOLCHAIN_PRESENT: ${{ steps.inspect.outputs.lean_toolchain_present }}
         with:
           github-token: ${{ secrets.LEANBOT_TOKEN }}
           script: |
             const issue_number = Number(${{ steps.meta.outputs.issue_number }})
-            const changedListRaw = `${{ steps.meta.outputs.changed_list }}`.trim()
-            const leanListRaw = `${{ steps.meta.outputs.lean_list }}`.trim()
-            const changedList = changedListRaw
-              ? changedListRaw.split('\n').map(x => `  - ${x}`).join('\n')
-              : '  - (none)'
-            const leanList = leanListRaw
-              ? leanListRaw.split('\n').map(x => `  - ${x}`).join('\n')
-              : '  - (none)'
-            const topFiles = `${{ steps.inspect.outputs.top_files }}`.trim()
-              .split('\n')
-              .slice(0, 12)
-              .map(x => `  - ${x}`)
-              .join('\n')
+            const changedRaw = (process.env.CHANGED_LIST || '').trim()
+            const leanRaw = (process.env.LEAN_LIST || '').trim()
+            const topRaw = (process.env.TOP_FILES || '').trim()
+            const changedList = changedRaw ? changedRaw.split('\n').map(x => `  - ${x}`).join('\n') : '  - (none)'
+            const leanList = leanRaw ? leanRaw.split('\n').map(x => `  - ${x}`).join('\n') : '  - (none)'
+            const topFiles = topRaw ? topRaw.split('\n').slice(0,12).map(x => `  - ${x}`).join('\n') : '  - (none)'
+            const leanToolchainPresent = process.env.LEAN_TOOLCHAIN_PRESENT === 'true'
+            const leanVersion = (process.env.LEAN_VERSION || '').trim() || '(not run)'
+            const lakeVersion = (process.env.LAKE_VERSION || '').trim() || '(not run)'
+            const leanToolchainValue = (process.env.LEAN_TOOLCHAIN_VALUE || '').trim() || '(missing)'
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -141,10 +160,18 @@ jobs:
                 `- repo root: \`${{ steps.inspect.outputs.repo_root }}\``,
                 `- README present: ${{ steps.inspect.outputs.readme_present }}`,
                 `- Lean/Example.lean present: ${{ steps.inspect.outputs.lean_example_present }}`,
+                `- lean-toolchain present: ${leanToolchainPresent}`,
+                `- lean-toolchain value: \`${leanToolchainValue}\``,
                 '**Top files in checkout**',
-                topFiles || '  - (none)',
+                topFiles,
                 '',
-                '- Phase 5 status: checkout of PR head is working.',
-                '- Next step: run Codex + Lean-capable analysis against the checked-out PR workspace.'
+                '**Lean environment**',
+                `- lean --version: \`${leanVersion.replace(/\n/g, ' | ')}\``,
+                `- lake --version: \`${lakeVersion.replace(/\n/g, ' | ')}\``,
+                '',
+                leanToolchainPresent
+                  ? '- Phase 6A status: repository-declared Lean environment reproduction is working.'
+                  : '- Phase 6A status: no `lean-toolchain` found, so Lean environment reproduction was skipped.',
+                '- Next step: add minimal project-aware Lean commands, then introduce Codex via API key.'
               ].join('\n')
             })
