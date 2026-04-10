@@ -1,0 +1,56 @@
+name: leanbot-golf
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  golf:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Handle /leanbot golf command
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = (context.payload.comment?.body || '').trim()
+            const isPR = Boolean(context.payload.issue?.pull_request)
+            const isOwner = context.actor === 'LehengChen'
+
+            core.info(`actor=${context.actor}`)
+            core.info(`body=${body}`)
+            core.info(`isPR=${isPR}`)
+
+            if (!isPR) {
+              core.info('Not a PR comment, exiting.')
+              return
+            }
+
+            if (body !== '/leanbot golf') {
+              core.info('Not the target command, exiting.')
+              return
+            }
+
+            if (!isOwner) {
+              core.info('Actor is not allowed for phase 1, exiting.')
+              return
+            }
+
+            const issue_number = context.payload.issue.number
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              body: [
+                '✅ leanbot received `/leanbot golf`.',
+                '',
+                `- PR: #${issue_number}`,
+                `- Triggered by: @${context.actor}`,
+                '- Phase 1 status: comment trigger is working.',
+                '- Next step: wire in PR metadata and changed-file analysis.'
+              ].join('\n')
+            })
