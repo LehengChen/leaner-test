@@ -88,6 +88,11 @@ jobs:
               echo '(missing)'
               echo 'EOF'
             fi
+            if [ -f lakefile.toml ] || [ -f lakefile.lean ]; then
+              echo 'lake_project_present=true'
+            else
+              echo 'lake_project_present=false'
+            fi
           } >> "$GITHUB_OUTPUT"
 
       - name: Install Lean from lean-toolchain
@@ -110,7 +115,22 @@ jobs:
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
 
-      - name: Reply with Phase 6A status
+      - name: Run minimal project-aware Lean commands
+        if: steps.meta.outputs.should_run == 'true' && steps.inspect.outputs.lake_project_present == 'true'
+        id: projectcheck
+        shell: bash
+        run: |
+          set -euxo pipefail
+          export PATH="$HOME/.elan/bin:$PATH"
+          lake build
+          {
+            echo 'lake_build_status=success'
+            echo 'lake_build_output<<EOF'
+            echo 'lake build completed successfully'
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Reply with Phase 6B status
         if: steps.meta.outputs.should_run == 'true'
         uses: actions/github-script@v7
         env:
@@ -121,6 +141,9 @@ jobs:
           LEAN_VERSION: ${{ steps.leanenv.outputs.lean_version }}
           LAKE_VERSION: ${{ steps.leanenv.outputs.lake_version }}
           LEAN_TOOLCHAIN_PRESENT: ${{ steps.inspect.outputs.lean_toolchain_present }}
+          LAKE_PROJECT_PRESENT: ${{ steps.inspect.outputs.lake_project_present }}
+          LAKE_BUILD_STATUS: ${{ steps.projectcheck.outputs.lake_build_status }}
+          LAKE_BUILD_OUTPUT: ${{ steps.projectcheck.outputs.lake_build_output }}
         with:
           github-token: ${{ secrets.LEANBOT_TOKEN }}
           script: |
@@ -132,9 +155,12 @@ jobs:
             const leanList = leanRaw ? leanRaw.split('\n').map(x => `  - ${x}`).join('\n') : '  - (none)'
             const topFiles = topRaw ? topRaw.split('\n').slice(0,12).map(x => `  - ${x}`).join('\n') : '  - (none)'
             const leanToolchainPresent = process.env.LEAN_TOOLCHAIN_PRESENT === 'true'
+            const lakeProjectPresent = process.env.LAKE_PROJECT_PRESENT === 'true'
             const leanVersion = (process.env.LEAN_VERSION || '').trim() || '(not run)'
             const lakeVersion = (process.env.LAKE_VERSION || '').trim() || '(not run)'
             const leanToolchainValue = (process.env.LEAN_TOOLCHAIN_VALUE || '').trim() || '(missing)'
+            const lakeBuildStatus = (process.env.LAKE_BUILD_STATUS || '').trim() || '(not run)'
+            const lakeBuildOutput = (process.env.LAKE_BUILD_OUTPUT || '').trim() || '(not run)'
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -162,6 +188,7 @@ jobs:
                 `- Lean/Example.lean present: ${{ steps.inspect.outputs.lean_example_present }}`,
                 `- lean-toolchain present: ${leanToolchainPresent}`,
                 `- lean-toolchain value: \`${leanToolchainValue}\``,
+                `- lake project present: ${lakeProjectPresent}`,
                 '**Top files in checkout**',
                 topFiles,
                 '',
@@ -169,9 +196,13 @@ jobs:
                 `- lean --version: \`${leanVersion.replace(/\n/g, ' | ')}\``,
                 `- lake --version: \`${lakeVersion.replace(/\n/g, ' | ')}\``,
                 '',
-                leanToolchainPresent
-                  ? '- Phase 6A status: repository-declared Lean environment reproduction is working.'
-                  : '- Phase 6A status: no `lean-toolchain` found, so Lean environment reproduction was skipped.',
-                '- Next step: add minimal project-aware Lean commands, then introduce Codex via API key.'
+                '**Project-aware Lean commands**',
+                `- lake build status: \`${lakeBuildStatus}\``,
+                `- lake build output: \`${lakeBuildOutput.replace(/\n/g, ' | ')}\``,
+                '',
+                lakeProjectPresent
+                  ? '- Phase 6B status: minimal project-aware Lean command execution is working.'
+                  : '- Phase 6B status: no Lake project found, so project-aware Lean commands were skipped.',
+                '- Next step: add `OPENAI_API_KEY` and prepare the first minimal Codex call on top of this Lean-capable workspace.'
               ].join('\n')
             })
