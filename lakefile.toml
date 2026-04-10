@@ -1,0 +1,6 @@
+name = "leaner_test"
+version = "0.1.0"
+defaultTargets = ["LeanerTest"]
+
+[[lean_lib]]
+name = "LeanerTest"
